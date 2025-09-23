@@ -1,14 +1,16 @@
 import express from "express";
-
 const recipeRoute = express.Router();
+import { getAllRecipes,getRecipe,createRecipe,updateRecipe,deleteRecipe } from "../../controller/recipeController/recipeController";
+import uploadMultiple from "../../utils/uploadMultiple";
+import upload from "../../utils/multer";
 
 recipeRoute.get("/", getAllRecipes);
 
-recipeRoute.post("/", createRecipe);
+recipeRoute.get("/:id", getRecipe);
 
-recipeRoute.get("/:id", getRecipeById);
+recipeRoute.post("/",upload.array("images"),uploadMultiple, createRecipe);
 
-recipeRoute.put("/:id", updateRecipe);
+recipeRoute.put("/:id",upload.array("images"),uploadMultiple, updateRecipe);
 
 recipeRoute.delete("/:id", deleteRecipe);
 

@@ -64,28 +64,46 @@ export const verifyEmail = async (req, res) => {
   }
 };
 
-
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
+    // 1. Validate incoming data
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email and password are required" });
+    }
 
-    const user = await User.findOne({ email });
-    if (!user || !user.password) {
+    // 2. Find the user by email
+    const user = await User.findOne({ email }).select('+password');
+
+    // 3. Handle user not found or no password stored
+    if (!user) {
       return res.status(400).json({ message: "Invalid credentials" });
     }
+
+    // 4. Handle unverified users
     if (!user.isVerified) {
-  return res.status(403).json({ message: "Please verify your email first" });
-}
+      return res.status(403).json({ message: "Please verify your email first" });
+    }
 
-
+    // 5. Compare the provided password with the stored hash
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ message: "Invalid credentials" });
+    if (!isMatch) {
+      return res.status(400).json({ message: "Invalid credentials" });
+    }
 
+    // 6. Generate a JWT and create a user object without the password
     const token = generateToken(user._id);
-    res.json({ token, user });
+    const userObject = user.toObject();
+    delete userObject.password;
+
+    // 7. Send success response
+    res.status(200).json({ token, user: userObject });
+
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    // 8. Handle server-side errors
+    console.error(err); // Log the full error for debugging
+    res.status(500).json({ message: "An unexpected error occurred" });
   }
 };
 

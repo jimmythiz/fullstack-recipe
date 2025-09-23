@@ -1,8 +1,8 @@
-import User from "../../model/userSchema";
+import User from "../../model/userSchema.js";
 import bcrypt from "bcrypt"
 import crypto from "crypto"
 import {generateToken} from "../../utils/generateToken.js"
-import {sendEmail} from "../../utils/sendEmail.js"
+import sendEmail from "../../utils/sendEmail.js"
 import dotenv from "dotenv";
 dotenv.config()
 

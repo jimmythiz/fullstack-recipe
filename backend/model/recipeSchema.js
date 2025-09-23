@@ -15,6 +15,10 @@ const recipeSchema = new mongoose.Schema(
       type: [String], // list of ingredients
       required: true,
     },
+    prepTime : {
+      type:Number,
+      required: true
+    },
     steps: [
       {
         text: { type: String, required: true }, // instruction text
@@ -32,7 +36,6 @@ const recipeSchema = new mongoose.Schema(
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
     },
     likes: [
       {

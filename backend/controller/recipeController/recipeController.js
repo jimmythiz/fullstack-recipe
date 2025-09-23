@@ -1,4 +1,4 @@
-import Recipe from "../../model/recipeSchema";
+import Recipe from "../../model/recipeSchema.js";
 
 export const getAllRecipes = async (req, res) => {
   try {
@@ -7,17 +7,15 @@ export const getAllRecipes = async (req, res) => {
     const skip = (page - 1) * limit;
     const recipes = await Recipe.find().skip(skip).limit(limit);
     const total = await Recipe.countDocuments();
-    return res
-      .status(200)
-      .json({
-        message: "Success",
-        page,
-        totalPages: Math.ceil(total / limit),
-        totalRecipes: total,
-        recipes,
-      });
+    return res.status(200).json({
+      message: "Success",
+      page,
+      totalPages: Math.ceil(total / limit),
+      totalRecipes: total,
+      recipes,
+    });
   } catch (error) {
-    return res.status(500).json(error.message);
+    return res.status(500).json({ message: error.message });
   }
 };
 
@@ -30,107 +28,114 @@ export const getRecipe = async (req, res) => {
     }
     return res.status(200).json({ message: "Success", recipe });
   } catch (error) {
-    return res.status(500).json(error.message);
+    return res.status(500).json({ message: error.message });
   }
 };
 
 export const createRecipe = async (req, res) => {
   try {
-    const { title, description, ingredients, steps, categories } = req.body;
-    if(!title|| !description|| !ingredients|| !steps || !categories){
-        res.status(400).json({message : "Incomplete Fields"})
+    const { title, description, ingredients, prepTime, steps, categories } = req.body;
+    
+    // Validation
+    if (!title || !description || !ingredients || !steps || !prepTime) {
+      return res.status(400).json({ message: "Required fields missing" });
     }
 
-    // ✅ whitelist allowed fields
+    // Parse JSON strings
+    const parsedIngredients = typeof ingredients === "string" ? JSON.parse(ingredients) : ingredients;
+    const parsedSteps = typeof steps === "string" ? JSON.parse(steps) : steps;
+    const parsedCategories = typeof categories === "string" ? JSON.parse(categories) : (categories || []);
+
+    // Validate parsed data
+    if (!Array.isArray(parsedIngredients) || parsedIngredients.length === 0) {
+      return res.status(400).json({ message: "At least one ingredient is required" });
+    }
+
+    if (!Array.isArray(parsedSteps) || parsedSteps.length === 0) {
+      return res.status(400).json({ message: "At least one step is required" });
+    }
+
+    // Get uploaded files
+    const finalImages = req.files["images"] || [];
+    const stepImages = req.files["stepImages"] || [];
+
+    // Map step images to steps
+    const stepsWithImages = parsedSteps.map((step, index) => ({
+      text: step.text,
+      image: stepImages[index]?.url || "",
+    }));
+
+    // Create recipe data
     const recipeData = {
-      title,
-      description,
-      ingredients: Array.isArray(ingredients) ? ingredients : [ingredients],
-      categories: Array.isArray(categories) ? categories : [categories],
-      createdBy: req.user.id, // always bind to logged-in user
+      title: title.trim(),
+      description: description.trim(),
+      prepTime: parseInt(prepTime),
+      ingredients: parsedIngredients.filter(ing => ing.trim() !== ""),
+      steps: stepsWithImages,
+      categories: Array.isArray(parsedCategories) ? parsedCategories : [],
+      images: finalImages.map((img) => img.url),
+      createdBy: req.user?.id || null, // This requires authentication middleware
     };
 
-    // ✅ handle step-by-step with optional images
-    if (steps) {
-      const parsedSteps = JSON.parse(steps); // if sent as JSON string
-      recipeData.steps = parsedSteps.map((step, index) => ({
-        text: step.text,
-        image: req.files?.stepImages?.[index]?.path || "", // attach uploaded step image if exists
-      }));
-    }
-
-    // ✅ handle final result images
-    if (req.files?.finalImages) {
-      recipeData.images = req.files.finalImages.map((file) => file.path);
-    }
     const recipe = await Recipe.create(recipeData);
-    res.status(201).json({ message: "Recipe Created", recipe });
+    res.status(201).json({ message: "Recipe Created Successfully", recipe });
   } catch (error) {
-    return res.status(500).json(error.message);
+    console.error("Create recipe error:", error);
+    return res.status(500).json({ 
+      message: "Failed to create recipe", 
+      error: error.message 
+    });
   }
 };
 
-
-// Update a recipe
 export const updateRecipe = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Define what fields can be updated
-    const allowedUpdates = [
-      "title",
-      "description",
-      "ingredients",
-      "steps",
-      "images",
-      "categories",
-    ];
-    const updates = Object.keys(req.body);
-    const isValidOperation = updates.every((key) =>
-      allowedUpdates.includes(key)
-    );
-
-    if (!isValidOperation) {
-      return res.status(400).json({ error: "Invalid update fields provided" });
-    }
-
-    // Find recipe
+    // Find recipe first
     const recipe = await Recipe.findById(id);
     if (!recipe) {
-      return res.status(404).json({ error: "Recipe not found" });
+      return res.status(404).json({ message: "Recipe not found" });
     }
 
-    // Apply updates with sanitization
-    updates.forEach((field) => {
-      let value = req.body[field];
+    // Check if user owns the recipe (if authentication is implemented)
+    // if (req.user && recipe.createdBy.toString() !== req.user.id) {
+    //   return res.status(403).json({ message: "Not authorized to update this recipe" });
+    // }
 
-      if (typeof value === "string") {
-        value = value.trim();
-      }
+    const { title, description, ingredients, prepTime, steps, categories } = req.body;
 
-      if (Array.isArray(value)) {
-        // ensure arrays contain only strings
-        value = value.map((item) =>
-          typeof item === "string" ? item.trim() : item
-        );
-      }
+    // Parse JSON strings if they exist
+    const parsedIngredients = ingredients ? (typeof ingredients === "string" ? JSON.parse(ingredients) : ingredients) : recipe.ingredients;
+    const parsedSteps = steps ? (typeof steps === "string" ? JSON.parse(steps) : steps) : recipe.steps;
+    const parsedCategories = categories ? (typeof categories === "string" ? JSON.parse(categories) : categories) : recipe.categories;
 
-      // Special handling for steps
-      if (field === "steps" && Array.isArray(value)) {
-        value = value.map((step) => ({
-          text: step.text?.trim() || "",
-          image: step.image?.trim() || "",
-        }));
-      }
+    // Get uploaded files
+    const finalImages = req.files["images"] || [];
+    const stepImages = req.files["stepImages"] || [];
 
-      recipe[field] = value;
-    });
+    // Update steps with new images if provided
+    const updatedSteps = parsedSteps.map((step, index) => ({
+      text: step.text,
+      image: stepImages[index]?.url || step.image || "",
+    }));
 
-    await recipe.save();
-    res.json({ message: "Recipe updated successfully", recipe });
+    // Update recipe
+    const updatedData = {
+      title: title ? title.trim() : recipe.title,
+      description: description ? description.trim() : recipe.description,
+      prepTime: prepTime ? parseInt(prepTime) : recipe.prepTime,
+      ingredients: parsedIngredients.filter(ing => ing.trim() !== ""),
+      steps: updatedSteps,
+      categories: parsedCategories,
+      images: finalImages.length > 0 ? finalImages.map(img => img.url) : recipe.images,
+    };
+
+    const updatedRecipe = await Recipe.findByIdAndUpdate(id, updatedData, { new: true });
+    res.json({ message: "Recipe updated successfully", recipe: updatedRecipe });
   } catch (error) {
     console.error("Update error:", error);
-    res.status(500).json({ error: "Server error while updating recipe" });
+    res.status(500).json({ message: "Server error while updating recipe", error: error.message });
   }
 };
 
@@ -138,11 +143,11 @@ export const deleteRecipe = async (req, res) => {
   try {
     const id = req.params.id;
     const deletedRecipe = await Recipe.findByIdAndDelete(id);
-    if(!deletedRecipe){
-        res.status(404).json({message:"Recipe not found"})
+    if (!deletedRecipe) {
+      return res.status(404).json({ message: "Recipe not found" });
     }
-    return res.status(200).json({ message: "Successfuly Deleted" });
+    return res.status(200).json({ message: "Successfully Deleted" });
   } catch (error) {
-    return res.status(500).json(error.message);
+    return res.status(500).json({ message: error.message });
   }
 };

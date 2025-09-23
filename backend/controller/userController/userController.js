@@ -1,7 +1,10 @@
 import User from "../../model/userSchema";
 import bcrypt from "bcrypt"
-import passport from "passport"
-import {generateToken} from "../../utils/gen"
+import crypto from "crypto"
+import {generateToken} from "../../utils/generateToken.js"
+import {sendEmail} from "../../utils/sendEmail.js"
+import dotenv from "dotenv";
+dotenv.config()
 
 export const signup = async (req, res) => {
   try {
@@ -24,38 +27,132 @@ export const signup = async (req, res) => {
       return res.status(422).json({ message: "Passwords do not match" });
     }
     
+    const verificationToken = crypto.randomBytes(32).toString("hex");
     const hashedPassword = await bcrypt.hash(password, 10);
-    const user = User.create({
+    const user = await User.create({
         firstName,
         lastName,
         email,
         username,
         password : hashedPassword,
+        authProvider: "local",
+        verificationToken
     })
-    res.status(201).json({message:"User created", user})
+    const verifyUrl = `${process.env.CLIENT_URL}/verify/${verificationToken}`;
+    await sendEmail(email, "Verify your account", `Click here to verify your account: ${verifyUrl}`);
+    res.status(201).json({message:"User created",user})
     
   } catch (error) {
     res.status(500).json({message : "User could not be created"})
   }
 };
 
-export const login = async (req, res,next) => {
-  passport.authenticate("local", { session: false }, (err, user, info) => {
-    if (err || !user) {
-      return res.status(400).json({ message: info?.message || "Login failed" });
-    }
+export const verifyEmail = async (req, res) => {
+  try {
+    const { token } = req.params;
 
-    // issue JWT
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
-      expiresIn: "7d",
-    });
+    const user = await User.findOne({ verificationToken: token });
+    if (!user) return res.status(400).json({ message: "Invalid token" });
 
-    res.json({ token, user });
-  })(req, res, next);
+    user.isVerified = true;
+    user.verificationToken = undefined;
+    await user.save();
+
+    res.status(200).json({ message: "Email verified successfully" });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 };
 
-export const resetPassword = async (req, res) => {};
 
-export const forgotPassword = async (req, res) => {};
+export const login = async (req, res) => {
+  try {
+    const { email, password } = req.body;
 
-export const deleteAccount = async (req, res) => {};
+
+    const user = await User.findOne({ email });
+    if (!user || !user.password) {
+      return res.status(400).json({ message: "Invalid credentials" });
+    }
+    if (!user.isVerified) {
+  return res.status(403).json({ message: "Please verify your email first" });
+}
+
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) return res.status(400).json({ message: "Invalid credentials" });
+
+    const token = generateToken(user._id);
+    res.json({ token, user });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const requestPasswordReset = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    const user = await User.findOne({ email });
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const resetToken = crypto.randomBytes(32).toString("hex");
+    user.resetPasswordToken = resetToken;
+    user.resetPasswordExpire = Date.now() + 3600000; // 1 hour
+    await user.save();
+
+    const resetUrl = `${process.env.CLIENT_URL}/reset-password/${resetToken}`;
+    await sendEmail(user.email, "Password Reset", `Reset your password here: ${resetUrl}`);
+
+    res.status(200).json({ message: "Password reset link sent" });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+
+export const resetPassword = async (req, res) => {
+  try {
+    const { token } = req.params;
+    const { password } = req.body;
+
+    const user = await User.findOne({
+      resetPasswordToken: token,
+      resetPasswordExpire: { $gt: Date.now() },
+    });
+
+    if (!user) return res.status(400).json({ message: "Invalid or expired token" });
+
+    user.password = await bcrypt.hash(password, 10);
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpire = undefined;
+    await user.save();
+
+    res.status(200).json({ message: "Password reset successful" });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+
+export const deleteAccount = async (req, res) => {
+  try {
+    const { userId } = req.user; 
+    const { password } = req.body;
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    // If user registered via Google, skip password check
+    if (user.authProvider === "local") {
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (!isMatch) return res.status(400).json({ message: "Incorrect password" });
+    }
+
+    await User.findByIdAndDelete(userId);
+
+    res.status(200).json({ message: "Account deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};

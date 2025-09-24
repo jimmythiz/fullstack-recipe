@@ -2,26 +2,19 @@ import mongoose from "mongoose";
 
 const userSchema = new mongoose.Schema(
   {
-    firstName: { type: String, trim: true },
-    lastName: { type: String, trim: true },
+    firstName: { type: String, trim: true, required: true, },
+
+    lastName: { type: String, trim: true, required: true, },
 
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
 
     username: { type: String, required: true, unique: true, trim: true },
 
-    password: { type: String }, // not required if using Google
-
-    googleId: { type: String }, // for Google OAuth users
+    password: { type: String,required: true,select: false, }, // not required if using Google
 
     profilePic: { type: String, default: "" },
 
     favourites: [{ type: mongoose.Schema.Types.ObjectId, ref: "Recipe" }], // bookmarked recipes
-
-    authProvider: {
-      type: String,
-      enum: ["local", "google"],
-      default: "local",
-    },
 
     verificationToken: { type: String }, // for email verification
     resetPasswordToken: { type: String },

@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import cookieParser from 'cookie-parser';
 import authRoutes from "./routes/authroutes/authRoutes.js";
 import recipeRoute from "./routes/recipeRoutes/recipeRoute.js";
 import userRoutes from "./routes/usersRoute/userRoutes.js";
@@ -9,7 +10,7 @@ import connectDB from "./utils/db.js";
 dotenv.config();
 
 const app = express();
-
+app.use(cookieParser());
 // Middlewares
 app.use(cors({
   origin: process.env.FRONTEND_URL|| "http://localhost:5173", 

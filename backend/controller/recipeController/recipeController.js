@@ -32,8 +32,34 @@ export const getRecipe = async (req, res) => {
   }
 };
 
+export const getMyRecipes = async (req,res)=>{
+  try{
+    const userId  = req.user._id
+    if (!userId){
+      return res.status(401).json({message:"Not Authenticated"})
+    }
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+    const recipes = await Recipe.find({createdBy:userId}).skip(skip).limit(limit);
+    const total = await Recipe.countDocuments({ createdBy: userId });
+    return res.status(200).json({
+      message: "Success",
+      page,
+      totalPages: Math.ceil(total / limit),
+      totalRecipes: total,
+      recipes,
+    });
+  }catch(error){
+    return res.status(500).json({message:error.message})
+  }
+}
+
 export const createRecipe = async (req, res) => {
   try {
+    if (!req.user?.isVerified){
+      return res.status(403).json({message:"Please verify your account"})
+    }
     const { title, description, ingredients, prepTime, steps, categories } = req.body;
     
     // Validation
@@ -74,7 +100,7 @@ export const createRecipe = async (req, res) => {
       steps: stepsWithImages,
       categories: Array.isArray(parsedCategories) ? parsedCategories : [],
       images: finalImages.map((img) => img.url),
-      createdBy: req.user?.id || null, // This requires authentication middleware
+      createdBy: req.user?._id , 
     };
 
     const recipe = await Recipe.create(recipeData);
@@ -91,6 +117,7 @@ export const createRecipe = async (req, res) => {
 export const updateRecipe = async (req, res) => {
   try {
     const { id } = req.params;
+    const userID = req.user._id
 
     // Find recipe first
     const recipe = await Recipe.findById(id);
@@ -99,9 +126,9 @@ export const updateRecipe = async (req, res) => {
     }
 
     // Check if user owns the recipe (if authentication is implemented)
-    // if (req.user && recipe.createdBy.toString() !== req.user.id) {
-    //   return res.status(403).json({ message: "Not authorized to update this recipe" });
-    // }
+    if (!recipe.createdBy.equals(req.user._id)) {
+       return res.status(403).json({ message: "Not authorized to update this recipe" });
+     }
 
     const { title, description, ingredients, prepTime, steps, categories } = req.body;
 
@@ -142,7 +169,13 @@ export const updateRecipe = async (req, res) => {
 export const deleteRecipe = async (req, res) => {
   try {
     const id = req.params.id;
-    const deletedRecipe = await Recipe.findByIdAndDelete(id);
+    const userID = req.user._id
+    const recipe = await Recipe.findById(id)
+    if (recipe.createdBy.toString() !== userID){
+      return res.status(403).json({message: "Unathorized"})
+    }
+    const deletedRecipe = await Recipe.findByIdAndDelete(id)
+
     if (!deletedRecipe) {
       return res.status(404).json({ message: "Recipe not found" });
     }

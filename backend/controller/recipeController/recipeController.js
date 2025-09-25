@@ -5,7 +5,7 @@ export const getAllRecipes = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
-    const recipes = await Recipe.find().skip(skip).limit(limit);
+    const recipes = await Recipe.find().populate("createdBy", "firstName lastName username email profilePic").skip(skip).limit(limit);
     const total = await Recipe.countDocuments();
     return res.status(200).json({
       message: "Success",
@@ -22,7 +22,7 @@ export const getAllRecipes = async (req, res) => {
 export const getRecipe = async (req, res) => {
   try {
     const id = req.params.id;
-    const recipe = await Recipe.findById(id);
+    const recipe = await Recipe.findById(id).populate("createdBy", "firstName lastName username email profilePic");
     if (!recipe) {
       return res.status(404).json({ message: "Recipe Not Found" });
     }

@@ -1,15 +1,16 @@
 import User from "../../model/userSchema.js";
-import bcrypt from "bcrypt"
-import crypto from "crypto"
-import {generateTokens} from "../../utils/generateToken.js"
-import sendEmail from "../../utils/sendEmail.js"
+import bcrypt from "bcrypt";
+import crypto from "crypto";
+import { generateTokens } from "../../utils/generateToken.js";
+import sendEmail from "../../utils/sendEmail.js";
 import dotenv from "dotenv";
 import jwt from "jsonwebtoken";
-dotenv.config()
+dotenv.config();
 
 export const signup = async (req, res) => {
   try {
-    const { firstName, lastName, email, username, password, confirmPassword } = req.body;
+    const { firstName, lastName, email, username, password, confirmPassword } =
+      req.body;
     if (
       !firstName ||
       !lastName ||
@@ -20,34 +21,52 @@ export const signup = async (req, res) => {
     ) {
       return res.status(400).json({ message: "Incomplete Fields" });
     }
-    const existing = await User.findOne({ email });
-    if (existing) {
-      return res.status(400).json({ message: "Email already in use" });
+    const existingUser = await User.findOne({
+      $or: [{ email: email }, { username: username }],
+    });
+
+   if (existingUser) {
+        // Check for username conflict FIRST
+        if (existingUser.username === username) { 
+            return res.status(409).json({ message: `Username '${username}' is already taken.` });
+        }
+        // If username was OK, check for email conflict (since the user was found for some reason)
+        if (existingUser.email === email) {
+            return res.status(409).json({ message: `Email '${email}' is already in use.` });
+        }
+        
+        // *Self-Correction/Sanity Check:* If you hit this point, the database returned a user, 
+        // but neither the username nor email match the input. This suggests a bug in your
+        // $or query or potential data inconsistencies, so throw an error.
+        console.error("User found but neither username nor email matched input!");
+        return res.status(500).json({ message: "A database inconsistency error occurred." });
     }
     if (password !== confirmPassword) {
       return res.status(422).json({ message: "Passwords do not match" });
     }
-    
-    const verificationToken = crypto.randomBytes(32).toString("hex");
+
+    const token = crypto.randomBytes(32).toString("hex");
     const hashedPassword = await bcrypt.hash(password, 10);
     const user = await User.create({
-        firstName,
-        lastName,
-        email,
-        username,
-        password : hashedPassword,
-        authProvider: "local",
-        verificationToken
-    })
-    const verifyUrl = `${process.env.FRONTEND_URL}/auth/verify/${verificationToken}`;
-    await sendEmail(email, "Verify your account", `Click here to verify your account: ${verifyUrl}`);
+      firstName,
+      lastName,
+      email,
+      username,
+      password: hashedPassword,
+      verificationToken:token,
+    });
+    const verifyUrl = `${process.env.FRONTEND_URL}/#/verify-account/${token}`;
+    await sendEmail(
+      email,
+      "Verify your account",
+      `Click here to verify your account: ${verifyUrl}`
+    );
     const userObject = user.toObject();
-delete userObject.password;
-delete userObject.verificationToken;
-    res.status(201).json({message:"User created",userObject})
-    
+    delete userObject.password;
+    delete userObject.verificationToken;
+    res.status(201).json({ message: "User created", userObject });
   } catch (error) {
-    res.status(500).json({message : "User could not be created"})
+    res.status(500).json({ message: "User could not be created" });
   }
 };
 
@@ -62,7 +81,7 @@ export const verifyEmail = async (req, res) => {
     user.verificationToken = undefined;
     await user.save();
 
-    res.status(200).json({ message: "Email verified successfully" });
+    res.status(200).json({ message: "Email verified successfully", user });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -73,17 +92,21 @@ export const login = async (req, res) => {
     const { email, password } = req.body;
 
     if (!email || !password) {
-      return res.status(400).json({ message: "Email and password are required" });
+      return res
+        .status(400)
+        .json({ message: "Email and password are required" });
     }
 
-    const user = await User.findOne({ email }).select('+password');
+    const user = await User.findOne({ email }).select("+password");
 
     if (!user) {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
     if (!user.isVerified) {
-      return res.status(403).json({ message: "Please verify your email first" });
+      return res
+        .status(403)
+        .json({ message: "Please verify your email first" });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
@@ -91,46 +114,43 @@ export const login = async (req, res) => {
       return res.status(400).json({ message: "Invalid credentials" });
     }
     const { accessToken, refreshToken } = generateTokens(user._id);
-    res.cookie('refreshToken', refreshToken, {
-            httpOnly: true, // Prevents client-side JS access
-            secure: process.env.NODE_ENV === 'production', // Use secure cookies in production
-            sameSite: 'strict', // Helps prevent CSRF attacks
-            maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days in milliseconds
-        });
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true, // Prevents client-side JS access
+      secure: process.env.NODE_ENV === "production", // Use secure cookies in production
+      sameSite: "strict", // Helps prevent CSRF attacks
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in milliseconds
+    });
 
-    res.status(200).json({ accessToken});
-
+    res.status(200).json({ accessToken });
   } catch (err) {
-    console.error(err); 
+    console.error(err);
     res.status(500).json({ message: "An unexpected error occurred" });
   }
 };
 
-
 export const refresh = (req, res) => {
-    const refreshToken = req.cookies.refreshToken;
-    
-    if (!refreshToken) {
-        return res.status(401).json({ message: "No refresh token provided" });
-    }
-    
-    try {
-        // Verify the refresh token
-        const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
-        
-        // Generate a new access token
-        const accessToken = jwt.sign(
-            { id: decoded.id },
-            process.env.ACCESS_TOKEN_SECRET,
-            { expiresIn: "15m" }
-        );
-        
-        res.status(200).json({ accessToken });
-        
-    } catch (err) {
-        // Handle invalid or expired refresh token
-        res.status(403).json({ message: "Invalid or expired refresh token" });
-    }
+  const refreshToken = req.cookies.refreshToken;
+
+  if (!refreshToken) {
+    return res.status(401).json({ message: "No refresh token provided" });
+  }
+
+  try {
+    // Verify the refresh token
+    const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
+
+    // Generate a new access token
+    const accessToken = jwt.sign(
+      { id: decoded.id },
+      process.env.ACCESS_TOKEN_SECRET,
+      { expiresIn: "15m" }
+    );
+
+    res.status(200).json({ accessToken });
+  } catch (err) {
+    // Handle invalid or expired refresh token
+    res.status(403).json({ message: "Invalid or expired refresh token" });
+  }
 };
 
 export const requestPasswordReset = async (req, res) => {
@@ -141,20 +161,26 @@ export const requestPasswordReset = async (req, res) => {
     if (!user) return res.status(404).json({ message: "User not found" });
 
     const resetToken = crypto.randomBytes(32).toString("hex");
-    const hashedToken = crypto.createHash("sha256").update(resetToken).digest("hex");
+    const hashedToken = crypto
+      .createHash("sha256")
+      .update(resetToken)
+      .digest("hex");
     user.resetPasswordToken = hashedToken;
-    user.resetPasswordExpire = Date.now() + 3600000; 
+    user.resetPasswordExpire = Date.now() + 3600000;
     await user.save();
 
     const resetUrl = `${process.env.FRONTEND_URL}/auth/reset-password/${resetToken}`;
-    await sendEmail(user.email, "Password Reset", `Reset your password here: ${resetUrl}`);
+    await sendEmail(
+      user.email,
+      "Password Reset",
+      `Reset your password here: ${resetUrl}`
+    );
 
     res.status(200).json({ message: "Password reset link sent" });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
-
 
 export const resetPassword = async (req, res) => {
   try {
@@ -167,7 +193,8 @@ export const resetPassword = async (req, res) => {
       resetPasswordExpire: { $gt: Date.now() },
     });
 
-    if (!user) return res.status(400).json({ message: "Invalid or expired token" });
+    if (!user)
+      return res.status(400).json({ message: "Invalid or expired token" });
 
     user.password = await bcrypt.hash(password, 10);
     user.resetPasswordToken = undefined;
@@ -181,48 +208,45 @@ export const resetPassword = async (req, res) => {
 };
 
 export const logout = (req, res) => {
-  
-    res.clearCookie('refreshToken', {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-    });
-    
-    res.status(200).json({ message: "Logged out successfully" });
+  res.clearCookie("refreshToken", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+  });
+
+  res.status(200).json({ message: "Logged out successfully" });
 };
 
-export const getUserDetails = async (req,res)=>{
-  try{
+export const getUserDetails = async (req, res) => {
+  try {
     const user = req.user;
-    if (!user){
-      return res.status(404).json({message:"User Not Found"})
+    if (!user) {
+      return res.status(404).json({ message: "User Not Found" });
     }
     return res.status(200).json({
-  _id: user._id,
-  firstName: user.firstName,
-  lastName: user.lastName,
-  email: user.email,
-  username: user.username,
-  isVerified: user.isVerified,
-});
-
-
-  }catch(error){
-    res.status(500).json({message : error.message})
+      _id: user._id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      username: user.username,
+      isVerified: user.isVerified,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
   }
-}
+};
 
 export const deleteAccount = async (req, res) => {
   try {
-    const  userId  = req.user._id; 
+    const userId = req.user._id;
     const { password } = req.body;
 
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-      const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch) return res.status(400).json({ message: "Incorrect password" });
-  
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch)
+      return res.status(400).json({ message: "Incorrect password" });
 
     await User.findByIdAndDelete(userId);
     res.clearCookie("refreshToken", { httpOnly: true, sameSite: "strict" });

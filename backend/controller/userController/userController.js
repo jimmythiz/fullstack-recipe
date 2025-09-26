@@ -169,7 +169,7 @@ export const requestPasswordReset = async (req, res) => {
     user.resetPasswordExpire = Date.now() + 3600000;
     await user.save();
 
-    const resetUrl = `${process.env.FRONTEND_URL}/auth/reset-password/${resetToken}`;
+    const resetUrl = `${process.env.FRONTEND_URL}/#/reset-password/${resetToken}`;
     await sendEmail(
       user.email,
       "Password Reset",

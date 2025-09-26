@@ -41,7 +41,7 @@ export const getMyRecipes = async (req,res)=>{
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
-    const recipes = await Recipe.find({createdBy:userId}).skip(skip).limit(limit);
+    const recipes = await Recipe.find({createdBy:userId}).populate("createdBy", "firstName lastName username email profilePic").skip(skip).limit(limit);
     const total = await Recipe.countDocuments({ createdBy: userId });
     return res.status(200).json({
       message: "Success",
@@ -165,22 +165,27 @@ export const updateRecipe = async (req, res) => {
     res.status(500).json({ message: "Server error while updating recipe", error: error.message });
   }
 };
-
 export const deleteRecipe = async (req, res) => {
   try {
-    const id = req.params.id;
-    const userID = req.user._id
-    const recipe = await Recipe.findById(id)
-    if (recipe.createdBy.toString() !== userID){
-      return res.status(403).json({message: "Unathorized"})
-    }
-    const deletedRecipe = await Recipe.findByIdAndDelete(id)
+    const { id } = req.params;
 
-    if (!deletedRecipe) {
+    // Check if recipe exists
+    const recipe = await Recipe.findById(id);
+    if (!recipe) {
       return res.status(404).json({ message: "Recipe not found" });
     }
-    return res.status(200).json({ message: "Successfully Deleted" });
+
+    // Ensure user owns this recipe
+    if (recipe.createdBy.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: "Unauthorized to delete this recipe" });
+    }
+
+    // Delete recipe
+    await recipe.deleteOne();
+
+    return res.status(200).json({ message: "Recipe deleted successfully" });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    console.error("Delete error:", error);
+    return res.status(500).json({ message: "Server error while deleting recipe", error: error.message });
   }
 };
